@@ -8,17 +8,23 @@
     "scheme": "transitdilli",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "com.transitdilli"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#FFFFFF",
+        "backgroundColor": "#059669",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.sahilbajaj2004.TransitDilli"
+      "package": "com.transitdilli"
+    },
+    "androidStatusBar": {
+      "backgroundColor": "#00000000",
+      "barStyle": "dark-content",
+      "translucent": true
     },
     "web": {
       "output": "server",
@@ -29,7 +35,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#059669",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 120
         }
