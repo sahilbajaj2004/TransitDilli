@@ -2,7 +2,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Asset } from 'expo-asset';
 import * as SQLite from 'expo-sqlite';
-import { TransitStopItem, TransitRouteItem } from './api';
+import { TransitStopItem, TransitRouteItem, RouteDirectionOption } from './api';
 
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 let isInitializing = false;
@@ -228,6 +228,94 @@ export async function searchOfflineRoutes(query?: string, limit: number = 30): P
   }
 }
 
+export interface DynamicRouteSuggestion {
+  shortName: string;
+  longName: string;
+  origin: string;
+  destination: string;
+  agency: string;
+  directionCount: number;
+  label: string;
+}
+
+/**
+ * 0ms local offline dynamic route auto-completion across 2,619 Delhi routes.
+ * e.g. "9" -> 901, 913, 971, 971A; "33" -> 33, 33A, 334; "971" -> 971, 971A.
+ */
+export async function suggestOfflineRoutes(query: string, limit: number = 12): Promise<DynamicRouteSuggestion[]> {
+  try {
+    const db = await getOfflineDatabase();
+    if (!db) return [];
+
+    const clean = (query || '').trim();
+    if (!clean) {
+      const popular = ['33', '502', 'TMS', 'OMS', '227A', '971', '913', '729', '419', '534', '100A', '73'];
+      const placeholders = popular.map(() => '?').join(',');
+      const rows = await db.getAllAsync<{
+        display_name: string;
+        starting_stop: string;
+        terminal_stop: string;
+        agency: string;
+        long_name: string;
+      }>(
+        `SELECT display_name, starting_stop, terminal_stop, agency, long_name
+         FROM Routes
+         WHERE display_name IN (${placeholders})
+         GROUP BY display_name
+         LIMIT ?`,
+        [...popular, limit]
+      );
+      return rows.map((r) => ({
+        shortName: r.display_name,
+        longName: r.long_name,
+        origin: r.starting_stop || 'Terminal',
+        destination: r.terminal_stop || 'Corridor',
+        agency: r.agency === 'DIMTS' ? 'DIMTS' : 'DTC',
+        directionCount: 2,
+        label: `${r.display_name} (${r.starting_stop} ➔ ${r.terminal_stop})`,
+      }));
+    }
+
+    const starts = `${clean}%`;
+    const contains = `%${clean}%`;
+
+    const rows = await db.getAllAsync<{
+      display_name: string;
+      starting_stop: string;
+      terminal_stop: string;
+      agency: string;
+      long_name: string;
+    }>(
+      `SELECT display_name, starting_stop, terminal_stop, agency, long_name
+       FROM Routes
+       WHERE display_name LIKE ? OR display_name LIKE ? OR starting_stop LIKE ? OR terminal_stop LIKE ?
+       GROUP BY display_name
+       ORDER BY 
+         CASE 
+           WHEN UPPER(display_name) = UPPER(?) THEN 0
+           WHEN UPPER(display_name) LIKE UPPER(?) THEN 1
+           ELSE 2
+         END,
+         LENGTH(display_name) ASC,
+         display_name ASC
+       LIMIT ?`,
+      [starts, contains, contains, contains, clean, starts, limit]
+    );
+
+    return rows.map((r) => ({
+      shortName: r.display_name,
+      longName: r.long_name,
+      origin: r.starting_stop || 'Terminal',
+      destination: r.terminal_stop || 'Corridor',
+      agency: r.agency === 'DIMTS' ? 'DIMTS' : 'DTC',
+      directionCount: 2,
+      label: `${r.display_name} (${r.starting_stop} ➔ ${r.terminal_stop})`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 0ms local offline route details and stop sequence
  */
@@ -326,5 +414,59 @@ export async function getOfflineRouteDetails(routeId: number | string): Promise<
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * 0ms local offline route bidirectional corridors (UP/DOWN directions)
+ */
+export async function getOfflineRouteDirections(routeCode: string): Promise<RouteDirectionOption[]> {
+  try {
+    const db = await getOfflineDatabase();
+    if (!db) return [];
+
+    const clean = routeCode.trim().toUpperCase();
+    const rows = await db.getAllAsync<{
+      route_id: number;
+      agency: string;
+      long_name: string;
+      short_name: string;
+      starting_stop: string;
+      terminal_stop: string;
+      direction: number;
+    }>(
+      `SELECT route_id, agency, long_name, short_name, starting_stop, terminal_stop, direction 
+       FROM Routes 
+       WHERE long_name LIKE ? OR long_name LIKE ? OR short_name = ?
+       ORDER BY direction DESC, route_id ASC`,
+      [`${clean}UP%`, `${clean}DOWN%`, clean]
+    );
+
+    const seen = new Set<string>();
+    const results: RouteDirectionOption[] = [];
+
+    for (const r of rows) {
+      const orig = r.starting_stop || 'Delhi Terminal';
+      const dest = r.terminal_stop || 'Destination';
+      const key = `${orig}->${dest}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      results.push({
+        routeId: String(r.route_id),
+        direction: r.direction ?? 1,
+        agency: r.agency,
+        longName: r.long_name,
+        origin: orig,
+        destination: dest,
+        label: `${orig} ➔ ${dest}`,
+        stopsCount: 0,
+        activeBusesCount: 0,
+      });
+    }
+
+    return results;
+  } catch {
+    return [];
   }
 }

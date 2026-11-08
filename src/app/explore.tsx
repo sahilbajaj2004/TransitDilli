@@ -89,10 +89,12 @@ export default function ExploreScreen() {
   }, [routes, search]);
 
   const agencyColor =
-    selectedRoute?.agency === 'DIMTS'
+    selectedRoute?.shortName?.toUpperCase().startsWith('D-') || selectedRoute?.shortName?.toUpperCase().startsWith('D')
+      ? '#8B5CF6' // DEVI Mohalla: Purple
+      : selectedRoute?.shortName?.toUpperCase().startsWith('ML')
+      ? '#06B6D4' // DMRC Feeder: Teal
+      : selectedRoute?.agency === 'DIMTS'
       ? '#EA580C' // Cluster Orange
-      : selectedRoute?.isElectric
-      ? '#0284C7' // DTC Electric Blue
       : '#1D4ED8'; // DTC Royal Blue
 
   return (
@@ -154,7 +156,13 @@ export default function ExploreScreen() {
             {filteredRoutes.slice(0, 20).map((route) => {
               const isSelected = selectedRoute?.id === route.id;
               const color =
-                route.agency === 'DIMTS' ? '#EA580C' : route.isElectric ? '#0284C7' : '#1D4ED8';
+                route.shortName?.toUpperCase().startsWith('D-') || route.shortName?.toUpperCase().startsWith('D')
+                  ? '#8B5CF6'
+                  : route.shortName?.toUpperCase().startsWith('ML')
+                  ? '#06B6D4'
+                  : route.agency === 'DIMTS'
+                  ? '#EA580C'
+                  : '#1D4ED8';
 
               return (
                 <TouchableOpacity

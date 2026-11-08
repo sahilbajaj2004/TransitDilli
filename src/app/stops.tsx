@@ -317,11 +317,14 @@ export default function StopsScreen() {
             {allIncomingBuses.map((arr, index) => {
               const isDue = arr.etaMinutes <= 2;
               const isCluster = arr.agency === 'DIMTS';
-              const badgeColor = isCluster
-                ? '#EA580C' // Cluster Orange
-                : arr.isElectric
-                ? '#0284C7' // DTC Electric Blue
-                : '#1D4ED8'; // DTC Royal Blue
+              const badgeColor =
+                arr.routeShortName?.toUpperCase().startsWith('D-') || arr.routeShortName?.toUpperCase().startsWith('D')
+                  ? '#8B5CF6' // DEVI Purple
+                  : arr.routeShortName?.toUpperCase().startsWith('ML')
+                  ? '#06B6D4' // DMRC Teal
+                  : isCluster
+                  ? '#EA580C' // Cluster Orange
+                  : '#1D4ED8'; // DTC Royal Blue
 
               return (
                 <View

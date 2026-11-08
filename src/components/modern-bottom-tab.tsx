@@ -6,6 +6,7 @@ import {
   Pressable,
   Platform,
   LayoutChangeEvent,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,8 +71,24 @@ export function ModernBottomTab(props: ModernBottomTabProps) {
   const bottomOffset = Math.max(insets.bottom + 6, 14);
 
   const [dockWidth, setDockWidth] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const routeCount = state.routes.length;
   const tabWidth = dockWidth > 0 ? (dockWidth - PADDING_HORIZONTAL * 2) / routeCount : 0;
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setIsKeyboardVisible(true)
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setIsKeyboardVisible(false)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Sliding pill position shared value
   const indicatorX = useSharedValue(0);
@@ -120,8 +137,20 @@ export function ModernBottomTab(props: ModernBottomTabProps) {
     width: indicatorWidth.value,
   }));
 
+  if (isKeyboardVisible) {
+    return null;
+  }
+
   return (
-    <View pointerEvents="box-none" style={[styles.dockContainer, { bottom: bottomOffset }]}>
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.dockContainer,
+        {
+          bottom: bottomOffset,
+        },
+      ]}
+    >
       <View onLayout={handleDockLayout} style={styles.island}>
         {/* Continuous Gliding Green Active Pill */}
         {tabWidth > 0 && (

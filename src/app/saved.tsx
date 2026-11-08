@@ -34,15 +34,15 @@ const INITIAL_SAVED_ROUTES: SavedRoute[] = [
     shortName: '534',
     name: 'Anand Vihar ISBT to Mehrauli Terminal',
     agency: 'DIMTS',
-    agencyColor: '#2563EB',
+    agencyColor: '#EA580C',
     activeBuses: 28,
   },
   {
     id: 'TMS_UP',
     shortName: 'TMS+',
     name: 'Ring Road Mudrika Express (Circular)',
-    agency: 'EV',
-    agencyColor: '#0891B2',
+    agency: 'DTC',
+    agencyColor: '#1D4ED8',
     activeBuses: 42,
   },
 ];

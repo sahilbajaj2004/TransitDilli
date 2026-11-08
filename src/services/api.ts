@@ -1,12 +1,17 @@
 import { Platform } from 'react-native';
+import { suggestOfflineRoutes, DynamicRouteSuggestion } from './offline-transit';
+export type { DynamicRouteSuggestion };
 
-const androidApiUrl = process.env.EXPO_PUBLIC_ANDROID_API_URL;
-const emulatorApiUrl = process.env.EXPO_PUBLIC_EMULATOR_API_URL;
-const localApiUrl = process.env.EXPO_PUBLIC_LOCAL_API_URL;
+const AWS_BACKEND_URL = 'https://constitute-reference-may-plates.trycloudflare.com';
+
+const androidApiUrl = process.env.EXPO_PUBLIC_ANDROID_API_URL || AWS_BACKEND_URL;
+const emulatorApiUrl = process.env.EXPO_PUBLIC_EMULATOR_API_URL || AWS_BACKEND_URL;
+const localApiUrl = process.env.EXPO_PUBLIC_LOCAL_API_URL || AWS_BACKEND_URL;
 
 const DEFAULT_URL =
   process.env.EXPO_PUBLIC_API_URL ||
-  (Platform.OS === 'android' ? androidApiUrl || emulatorApiUrl : localApiUrl);
+  (Platform.OS === 'android' ? androidApiUrl || emulatorApiUrl : localApiUrl) ||
+  AWS_BACKEND_URL;
 
 export let currentBaseUrl = DEFAULT_URL;
 
@@ -19,7 +24,7 @@ export interface LiveBus {
   routeDesc: string;
   origin: string;
   destination: string;
-  agency: 'DTC' | 'DIMTS' | 'EV';
+  agency: 'DTC' | 'DIMTS' | 'DEVI' | 'DMRC';
   agencyName: string;
   fuelType: 'electric' | 'cng' | 'diesel';
   isElectric: boolean;
@@ -34,6 +39,18 @@ export interface LiveBus {
   distanceMeters?: number;
   freshness: string;
   timestamp: number;
+}
+
+export interface RouteDirectionOption {
+  routeId: string;
+  direction: number;
+  agency: string;
+  longName: string;
+  origin: string;
+  destination: string;
+  label: string;
+  stopsCount: number;
+  activeBusesCount: number;
 }
 
 export interface TransitStopItem {
@@ -161,17 +178,73 @@ export async function fetchLiveNearbyBuses(
 
   return rawList.map((b: any) => {
     const isEv = !!b.isElectric || b.fuelType === 'electric';
-    const isCluster = b.agency === 'DIMTS';
-    const agencyType: 'DTC' | 'DIMTS' | 'EV' = isEv ? 'EV' : isCluster ? 'DIMTS' : 'DTC';
+    const reg = String(b.id || '').toUpperCase();
+    let rawShort = String(b.routeShortName || b.route || 'Bus').trim();
 
-    // Commuter-facing route name sanitization: eliminate raw 4-digit database integer IDs
-    let shortName = String(b.routeShortName || b.route || 'Bus').trim();
-    if (/^\d{4,}$/.test(shortName)) {
-      const canonical = ['502', '534', '729', '813', '946', 'TMS', 'OMS', '419', '73', '505', '623', '780', '227A', '913', '405', '456', '522A'];
-      let h = 0;
-      for (let i = 0; i < shortName.length; i++) h = (h * 31 + shortName.charCodeAt(i)) >>> 0;
-      shortName = canonical[h % canonical.length];
+    // 1. Classification across the 4 authentic Delhi transit services
+    let agencyType: 'DTC' | 'DIMTS' | 'DEVI' | 'DMRC' = 'DTC';
+    if (
+      b.agency === 'DEVI' ||
+      rawShort.toUpperCase().startsWith('D-') ||
+      /^D\d/i.test(rawShort) ||
+      rawShort.toUpperCase().includes('DEVI')
+    ) {
+      agencyType = 'DEVI';
+    } else if (
+      b.agency === 'DMRC' ||
+      rawShort.toUpperCase().startsWith('ML') ||
+      rawShort.toUpperCase().startsWith('MS') ||
+      rawShort.toUpperCase().startsWith('MC') ||
+      rawShort.toUpperCase().includes('DMRC')
+    ) {
+      agencyType = 'DMRC';
+    } else if (
+      b.agency === 'DIMTS' ||
+      reg.startsWith('DL51GD') ||
+      reg.startsWith('DL1PB')
+    ) {
+      agencyType = 'DIMTS';
     }
+
+    // Commuter-facing route name formatting: preserve full route names without truncating
+    let shortName = rawShort;
+    if (/^D-\d+$/i.test(shortName)) {
+      shortName = shortName.replace('-', ''); // D-5507 -> D5507
+    } else if (/^ML-\d+$/i.test(shortName)) {
+      shortName = shortName.replace('-', ''); // ML-403 -> ML403
+    } else if (/^\d{4,}$/.test(shortName)) {
+      // Keep authentic route from backend
+    }
+
+    // Theme Color Tokens
+    const themeColor =
+      agencyType === 'DEVI'
+        ? '#8B5CF6' // Purple
+        : agencyType === 'DMRC'
+        ? '#06B6D4' // Teal
+        : agencyType === 'DIMTS'
+        ? '#EA580C' // Orange
+        : '#1D4ED8'; // Royal Blue
+
+    const secondaryColor =
+      agencyType === 'DEVI'
+        ? '#7C3AED'
+        : agencyType === 'DMRC'
+        ? '#0891B2'
+        : agencyType === 'DIMTS'
+        ? '#C2410C'
+        : '#1E40AF';
+
+    const agencyName =
+      agencyType === 'DEVI'
+        ? 'DEVI Mohalla Bus'
+        : agencyType === 'DMRC'
+        ? 'DMRC Metro Feeder'
+        : agencyType === 'DIMTS'
+        ? 'Cluster Bus (DIMTS)'
+        : isEv
+        ? 'DTC Electric'
+        : 'DTC State Fleet';
 
     return {
       id: b.id,
@@ -183,19 +256,13 @@ export async function fetchLiveNearbyBuses(
       origin: b.origin || 'Delhi Terminal',
       destination: b.destination || 'Corridor',
       agency: agencyType,
-      agencyName: b.agencyName || (isCluster ? 'Cluster Bus (DIMTS)' : isEv ? 'DTC Electric' : 'DTC Fleet'),
+      agencyName,
       fuelType: b.fuelType || (isEv ? 'electric' : 'cng'),
-      isElectric: isEv,
+      isElectric: isEv || agencyType === 'DEVI',
       isAc: !!b.isAc || b.ac === 'ac',
       ac: b.ac || 'nac',
-      themeColor:
-        isCluster
-          ? '#EA580C' // Cluster Bus: Orange
-          : isEv
-          ? '#0284C7' // DTC Electric: Electric Blue
-          : '#1D4ED8', // DTC Fleet: Blue
-      secondaryColor:
-        isCluster ? '#C2410C' : isEv ? '#0369A1' : '#1E40AF',
+      themeColor,
+      secondaryColor,
       lat: b.lat,
       lon: b.lon,
       speed: Math.round(b.speedKmph || 0),
@@ -205,6 +272,366 @@ export async function fetchLiveNearbyBuses(
       timestamp: b.timestamp || Date.now() / 1000,
     };
   });
+}
+
+/**
+ * Real-time Buses on specific Route(s): POST /api/v1/live/buses-on-route
+ * Returns all active buses operating across Delhi on the given route codes.
+ */
+export async function fetchBusesOnRoutes(routes: string[]): Promise<LiveBus[]> {
+  try {
+    const res = await requestWithFallback('/api/v1/live/buses-on-route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ routes }),
+    });
+
+    const json = await res.json();
+    const rawList = Array.isArray(json.data) ? json.data : [];
+    const seenIds = new Set<string>();
+
+    const uniqueRaw = rawList.filter((b: any) => {
+      const id = String(b?.id || '').trim();
+      if (!id || seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+
+    return uniqueRaw.map((b: any) => {
+      const isEv = !!b.isElectric || b.fuelType === 'electric';
+      const reg = String(b.id || '').toUpperCase();
+      let rawShort = String(b.routeShortName || b.route || 'Bus').trim();
+
+      let agencyType: 'DTC' | 'DIMTS' | 'DEVI' | 'DMRC' = 'DTC';
+      if (
+        b.agency === 'DEVI' ||
+        rawShort.toUpperCase().startsWith('D-') ||
+        /^D\d/i.test(rawShort) ||
+        rawShort.toUpperCase().includes('DEVI')
+      ) {
+        agencyType = 'DEVI';
+      } else if (
+        b.agency === 'DMRC' ||
+        rawShort.toUpperCase().startsWith('ML') ||
+        rawShort.toUpperCase().startsWith('MS') ||
+        rawShort.toUpperCase().startsWith('MC') ||
+        rawShort.toUpperCase().includes('DMRC')
+      ) {
+        agencyType = 'DMRC';
+      } else if (
+        b.agency === 'DIMTS' ||
+        reg.startsWith('DL51GD') ||
+        reg.startsWith('DL1PB')
+      ) {
+        agencyType = 'DIMTS';
+      }
+
+      let shortName = rawShort;
+      if (/^D-\d+$/i.test(shortName)) {
+        shortName = shortName.replace('-', '');
+      } else if (/^ML-\d+$/i.test(shortName)) {
+        shortName = shortName.replace('-', '');
+      } else if (/^\d{4,}$/.test(shortName)) {
+        // Keep authentic route from backend
+      }
+
+      const themeColor =
+        agencyType === 'DEVI'
+          ? '#8B5CF6'
+          : agencyType === 'DMRC'
+          ? '#06B6D4'
+          : agencyType === 'DIMTS'
+          ? '#EA580C'
+          : '#1D4ED8';
+
+      const secondaryColor =
+        agencyType === 'DEVI'
+          ? '#7C3AED'
+          : agencyType === 'DMRC'
+          ? '#0891B2'
+          : agencyType === 'DIMTS'
+          ? '#C2410C'
+          : '#1E40AF';
+
+      const agencyName =
+        agencyType === 'DEVI'
+          ? 'DEVI Mohalla Bus'
+          : agencyType === 'DMRC'
+          ? 'DMRC Metro Feeder'
+          : agencyType === 'DIMTS'
+          ? 'Cluster Bus (DIMTS)'
+          : isEv
+          ? 'DTC Electric'
+          : 'DTC State Fleet';
+
+      return {
+        id: b.id,
+        registration: b.id,
+        route: shortName,
+        routeId: b.routeId || b.route,
+        routeShortName: shortName,
+        routeDesc: b.routeDesc || `Route ${shortName}`,
+        origin: b.origin || 'Delhi Terminal',
+        destination: b.destination || 'Corridor',
+        agency: agencyType,
+        agencyName,
+        fuelType: b.fuelType || (isEv ? 'electric' : 'cng'),
+        isElectric: isEv || agencyType === 'DEVI',
+        isAc: !!b.isAc || b.ac === 'ac',
+        ac: b.ac || 'nac',
+        themeColor,
+        secondaryColor,
+        lat: b.lat,
+        lon: b.lon,
+        speed: Math.round(b.speedKmph || 0),
+        bearing: Math.round(b.orientation || 0),
+        distanceMeters: b.distanceMeters,
+        freshness: b.freshness || 'Live',
+        timestamp: b.timestamp || Date.now() / 1000,
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
+export interface BusSearchResponse {
+  buses: LiveBus[];
+  directions: RouteDirectionOption[];
+}
+
+/**
+ * Real-time Search Across ALL Live Buses in Delhi: GET /api/v1/buses/search?q=...
+ * Searches across the entire 4,500+ active fleet:
+ * - Route short name (33, 502, TMS, 227A, 913, 729, D5507, ML403)
+ * - Vehicle registration (DL1PD9227, DL1PD, DL51, 9227)
+ * - Destination / Origin (Anand Vihar, Bhajanpura, Noida, Kashmere Gate)
+ * - Transit agency (DTC, DIMTS, DEVI, DMRC)
+ */
+export async function searchAllDelhiBuses(
+  query: string,
+  agency?: string
+): Promise<BusSearchResponse> {
+  const cleanQ = query.trim();
+  if (!cleanQ) {
+    return { buses: [], directions: [] };
+  }
+
+  try {
+    const qParam = encodeURIComponent(cleanQ);
+    const agencyParam = agency && agency !== 'ALL' ? `&agency=${encodeURIComponent(agency)}` : '';
+    const res = await requestWithFallback(`/api/v1/buses/search?q=${qParam}${agencyParam}&limit=150`, {
+      method: 'GET',
+    });
+
+    const json = await res.json();
+    const rawList = Array.isArray(json.data) ? json.data : [];
+    const directions: RouteDirectionOption[] = Array.isArray(json.directions) ? json.directions : [];
+
+    const seenIds = new Set<string>();
+    const buses: LiveBus[] = [];
+
+    for (const b of rawList) {
+      const id = String(b?.id || '').trim();
+      if (!id || seenIds.has(id)) continue;
+      seenIds.add(id);
+
+      const isEv = !!b.isElectric || b.fuelType === 'electric';
+      const reg = String(b.id || '').toUpperCase();
+      let rawShort = String(b.routeShortName || b.route || 'Bus').trim();
+
+      let agencyType: 'DTC' | 'DIMTS' | 'DEVI' | 'DMRC' = 'DTC';
+      if (
+        b.agency === 'DEVI' ||
+        rawShort.toUpperCase().startsWith('D-') ||
+        /^D\d/i.test(rawShort) ||
+        rawShort.toUpperCase().includes('DEVI')
+      ) {
+        agencyType = 'DEVI';
+      } else if (
+        b.agency === 'DMRC' ||
+        rawShort.toUpperCase().startsWith('ML') ||
+        rawShort.toUpperCase().startsWith('MS') ||
+        rawShort.toUpperCase().startsWith('MC') ||
+        rawShort.toUpperCase().includes('DMRC')
+      ) {
+        agencyType = 'DMRC';
+      } else if (
+        b.agency === 'DIMTS' ||
+        reg.startsWith('DL51GD') ||
+        reg.startsWith('DL1PB')
+      ) {
+        agencyType = 'DIMTS';
+      }
+
+      let shortName = rawShort;
+      if (/^D-\d+$/i.test(shortName)) {
+        shortName = shortName.replace('-', '');
+      } else if (/^ML-\d+$/i.test(shortName)) {
+        shortName = shortName.replace('-', '');
+      } else if (/^\d{4,}$/.test(shortName)) {
+        // Keep authentic route from backend
+      }
+
+      const themeColor =
+        agencyType === 'DEVI'
+          ? '#8B5CF6'
+          : agencyType === 'DMRC'
+          ? '#06B6D4'
+          : agencyType === 'DIMTS'
+          ? '#EA580C'
+          : '#1D4ED8';
+
+      const secondaryColor =
+        agencyType === 'DEVI'
+          ? '#7C3AED'
+          : agencyType === 'DMRC'
+          ? '#0891B2'
+          : agencyType === 'DIMTS'
+          ? '#C2410C'
+          : '#1E40AF';
+
+      const agencyName =
+        agencyType === 'DEVI'
+          ? 'DEVI Mohalla Bus'
+          : agencyType === 'DMRC'
+          ? 'DMRC Metro Feeder'
+          : agencyType === 'DIMTS'
+          ? 'Cluster Bus (DIMTS)'
+          : isEv
+          ? 'DTC Electric'
+          : 'DTC State Fleet';
+
+      buses.push({
+        id: b.id,
+        registration: b.id,
+        route: shortName,
+        routeId: b.routeId || b.route,
+        routeShortName: shortName,
+        routeDesc: b.routeDesc || `Route ${shortName}`,
+        origin: b.origin || 'Delhi Terminal',
+        destination: b.destination || 'Corridor',
+        agency: agencyType,
+        agencyName,
+        fuelType: b.fuelType || (isEv ? 'electric' : 'cng'),
+        isElectric: isEv || agencyType === 'DEVI',
+        isAc: !!b.isAc || b.ac === 'ac',
+        ac: b.ac || 'nac',
+        themeColor,
+        secondaryColor,
+        lat: Number(b.lat),
+        lon: Number(b.lon),
+        speed: Math.round(b.speedKmph || 0),
+        bearing: Math.round(b.bearing || b.orientation || 0),
+        distanceMeters: b.distanceMeters,
+        freshness: b.freshness || 'Live',
+        timestamp: b.timestamp || Date.now() / 1000,
+      });
+    }
+
+    return { buses, directions };
+  } catch {
+    return { buses: [], directions: [] };
+  }
+}
+
+/**
+ * Real-time Single Vehicle Position & ETA Stream: GET /api/v1/buses/:vehicleId
+ */
+export async function fetchBusLiveTelemetry(vehicleId: string): Promise<LiveBus | null> {
+  try {
+    const cleanId = encodeURIComponent(vehicleId.toUpperCase().replace(/\s+/g, ''));
+    const res = await requestWithFallback(`/api/v1/buses/${cleanId}`, {
+      method: 'GET',
+    });
+
+    const json = await res.json();
+    if (!json || json.status !== 'success' || !json.data) return null;
+
+    const b = json.data;
+    const isEv = !!b.isElectric || b.fuelType === 'electric';
+    const reg = String(b.id || '').toUpperCase();
+    let rawShort = String(b.routeShortName || b.route || 'Bus').trim();
+
+    let agencyType: 'DTC' | 'DIMTS' | 'DEVI' | 'DMRC' = 'DTC';
+    if (
+      b.agency === 'DEVI' ||
+      rawShort.toUpperCase().startsWith('D-') ||
+      /^D\d/i.test(rawShort) ||
+      rawShort.toUpperCase().includes('DEVI')
+    ) {
+      agencyType = 'DEVI';
+    } else if (
+      b.agency === 'DMRC' ||
+      rawShort.toUpperCase().startsWith('ML') ||
+      rawShort.toUpperCase().startsWith('MS') ||
+      rawShort.toUpperCase().startsWith('MC') ||
+      rawShort.toUpperCase().includes('DMRC')
+    ) {
+      agencyType = 'DMRC';
+    } else if (
+      b.agency === 'DIMTS' ||
+      reg.startsWith('DL51GD') ||
+      reg.startsWith('DL1PB')
+    ) {
+      agencyType = 'DIMTS';
+    }
+
+    let shortName = rawShort;
+    if (/^D-\d+$/i.test(shortName)) {
+      shortName = shortName.replace('-', '');
+    } else if (/^ML-\d+$/i.test(shortName)) {
+      shortName = shortName.replace('-', '');
+    } else if (/^\d{4,}$/.test(shortName)) {
+      // Keep authentic route from backend
+    }
+
+    const themeColor =
+      agencyType === 'DEVI'
+        ? '#8B5CF6'
+        : agencyType === 'DMRC'
+        ? '#06B6D4'
+        : agencyType === 'DIMTS'
+        ? '#EA580C'
+        : '#1D4ED8';
+
+    const secondaryColor =
+      agencyType === 'DEVI'
+        ? '#7C3AED'
+        : agencyType === 'DMRC'
+        ? '#0891B2'
+        : agencyType === 'DIMTS'
+        ? '#C2410C'
+        : '#1E40AF';
+
+    return {
+      id: b.id,
+      registration: b.id,
+      route: shortName,
+      routeId: b.routeId || b.route,
+      routeShortName: shortName,
+      routeDesc: b.routeDesc || `Route ${shortName}`,
+      origin: b.origin || 'Delhi Terminal',
+      destination: b.destination || 'Corridor',
+      agency: agencyType,
+      agencyName: b.agencyName || (agencyType === 'DEVI' ? 'DEVI Mohalla Bus' : agencyType === 'DMRC' ? 'DMRC Metro Feeder' : agencyType === 'DIMTS' ? 'Cluster Bus (DIMTS)' : 'DTC State Fleet'),
+      fuelType: b.fuelType || (isEv ? 'electric' : 'cng'),
+      isElectric: isEv || agencyType === 'DEVI',
+      isAc: !!b.isAc || b.ac === 'ac',
+      ac: b.ac || 'nac',
+      themeColor,
+      secondaryColor,
+      lat: b.lat,
+      lon: b.lon,
+      speed: Math.round(b.speedKmph || 0),
+      bearing: Math.round(b.bearing || 0),
+      distanceMeters: b.distanceMeters,
+      freshness: 'Just now',
+      timestamp: b.timestamp || Date.now() / 1000,
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -314,6 +741,23 @@ export async function fetchTransitRouteById(routeId: string): Promise<TransitRou
 }
 
 /**
+ * Route bidirectional options: GET /api/v1/transit/route-directions/:routeCode
+ * Returns UP and DOWN direction paths (e.g. for Route 33: Bhajanpura -> Noida vs. Noida -> Bhajanpura).
+ */
+export async function fetchRouteDirections(routeCode: string): Promise<RouteDirectionOption[]> {
+  try {
+    const res = await requestWithFallback(`/api/v1/transit/route-directions/${encodeURIComponent(routeCode.trim())}`);
+    const json = await res.json();
+    if (json.status === 'success' && Array.isArray(json.directions)) {
+      return json.directions;
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Live single vehicle telemetry: GET /api/v1/live/bus/:vehicleId
  */
 export async function fetchVehicleTelemetry(vehicleId: string): Promise<any | null> {
@@ -324,4 +768,21 @@ export async function fetchVehicleTelemetry(vehicleId: string): Promise<any | nu
   } catch {
     return null;
   }
+}
+
+/**
+ * Dynamic prefix & corridor auto-complete: GET /api/v1/buses/suggest-routes?q=...
+ * e.g. "9" -> 901, 913, 971, 971A; "33" -> 33, 33A, 334.
+ */
+export async function fetchRouteSuggestions(query: string, limit = 12): Promise<DynamicRouteSuggestion[]> {
+  try {
+    const res = await requestWithFallback(`/api/v1/buses/suggest-routes?q=${encodeURIComponent(query.trim())}&limit=${limit}`);
+    const json = await res.json();
+    if (json.status === 'success' && Array.isArray(json.data) && json.data.length > 0) {
+      return json.data;
+    }
+  } catch {
+    // fallback to offline SQLite
+  }
+  return suggestOfflineRoutes(query, limit);
 }

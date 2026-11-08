@@ -66,7 +66,32 @@ export const TRANSIT_MAP_STYLE = [
     stylers: [{ color: '#94A3B8' }],
   },
   {
+    featureType: 'road.highway.controlled_access',
+    elementType: 'geometry',
+    stylers: [{ color: '#273549' }],
+  },
+  {
+    featureType: 'road.highway.controlled_access',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#16202E' }],
+  },
+  {
+    featureType: 'road.arterial',
+    elementType: 'geometry',
+    stylers: [{ color: '#1E293B' }],
+  },
+  {
+    featureType: 'road.arterial',
+    elementType: 'geometry.stroke',
+    stylers: [{ color: '#0F172A' }],
+  },
+  {
     featureType: 'transit',
+    elementType: 'geometry',
+    stylers: [{ color: '#1E293B' }],
+  },
+  {
+    featureType: 'transit.line',
     elementType: 'geometry',
     stylers: [{ color: '#1E293B' }],
   },

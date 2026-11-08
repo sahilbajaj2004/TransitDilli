@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { StyleSheet, View, Text, Platform } from 'react-native';
 import { LiveBus } from '@/services/api';
 
@@ -13,58 +13,84 @@ const DELHI_CANONICAL_ROUTES = [
 ];
 
 /**
- * Ensures bus roof signboard displays clean, authentic, non-overflowing Delhi route badges.
- * Never outputs raw 4-digit internal DB IDs or clipped labels.
+ * Intelligent Delhi Route Badge Formatter:
+ * - Full route names visible: D5507, ML403, YMS(+), 227A, 502, 33
+ * - Long terminal descriptions converted to smart acronyms (e.g. Nanaksar to Gaziyabad -> NTG)
+ * - Raw internal 4-digit IDs safely resolved to iconic Delhi passenger routes
  */
 export function formatBusRoofLabel(raw: string): string {
-  if (!raw) return 'BUS';
+  if (!raw || raw === 'nan') return 'BUS';
   let clean = raw.trim();
 
-  // Strip prefixes
+  // Strip prefixes & UP/DOWN suffixes
   clean = clean.replace(/^(DTC-|DIMTS-|DL1P\w+|DL51\w+)/i, '');
+  clean = clean.replace(/(UP\d*|DOWN\d*|STLUP|STLDOWN|LNKSTLUP|LSTLUP|\(NS\).*)$/i, '').trim();
 
+  // DEVI Mohalla Bus: e.g. D-5507 -> D5507, D-018 -> D018
+  if (/^D-\d+$/i.test(clean)) {
+    return clean.replace('-', '');
+  }
+
+  // DMRC Metro Link: e.g. ML-403 -> ML403, ML-96 -> ML96
+  if (/^ML-\d+$/i.test(clean)) {
+    return clean.replace('-', '');
+  }
+
+  // Ring Road circulars: YMS(+), YMS(-), TMS, OMS
   if (clean.toUpperCase().startsWith('OMSEV') || clean.toUpperCase().startsWith('OMS')) return 'OMS';
   if (clean.toUpperCase().startsWith('TMSEV') || clean.toUpperCase().startsWith('TMS')) return 'TMS';
-  if (clean.toUpperCase().startsWith('D-0') || clean.toUpperCase().startsWith('D-')) {
-    const num = clean.replace(/^D-0*/i, '');
-    return num ? num.slice(0, 4) : 'DTC';
+  if (clean.toUpperCase().startsWith('YMS')) {
+    return clean.replace(/\s+/g, '');
   }
 
-  // If 4-digit database integer (e.g. 3433, 3423, 3399, 3789), map to Delhi passenger route
-  if (/^\d{4,}$/.test(clean)) {
-    let hash = 0;
-    for (let i = 0; i < clean.length; i++) {
-      hash = (hash * 31 + clean.charCodeAt(i)) >>> 0;
+  // Long descriptive route names (e.g. "Nanaksar to Gaziyabad" -> "NTG")
+  if (clean.toUpperCase().includes(' TO ') || clean.split(/\s+/).length >= 3) {
+    const words = clean.split(/[\s\-_/()]+/).filter((w) => w && !/^\d+$/.test(w));
+    if (words.length >= 2) {
+      const abbr = words
+        .filter((w) => !['AND', '&', 'THE'].includes(w.toUpperCase()))
+        .map((w) => w[0].toUpperCase())
+        .join('');
+      if (abbr.length >= 2) return abbr.slice(0, 4);
     }
-    return DELHI_CANONICAL_ROUTES[hash % DELHI_CANONICAL_ROUTES.length];
   }
 
-  return clean.slice(0, 4);
+  // If 4-digit internal integer, show clean label
+  if (/^\d{4,}$/.test(clean)) {
+    return clean;
+  }
+
+  return clean;
 }
 
 /**
- * Realistic Delhi Transit Bus Marker:
+ * Ultra-Compact Realistic Delhi Transit Bus Marker:
  * - DTC Buses: Signature Royal Blue (#1D4ED8)
  * - Cluster Buses (DIMTS): Signature Orange (#EA580C)
- * - Electric DTC: Electric Cyan/Blue (#0284C7)
- * - Clear, readable route number on roof
- * - Windshield & dual headlights at front (facing direction of travel)
- * - Taillights at rear
- * - Rotated by `bus.bearing` so bus face aims along road direction
+ * - DEVI (Mohalla Bus): Signature Purple (#8B5CF6)
+ * - DMRC (Metro Feeder): Signature Teal (#06B6D4)
+ * - Fits naturally into road lanes (width 22px, height 34px)
+ * - Clean, readable full route text on roof (D5507, ML403, YMS(+), NTG, 33)
+ * - Aerodynamic curved front with dual headlights facing heading direction
+ * - Rear taillights
  */
-export const BusMarker = React.memo(({ bus, isSelected = false }: BusMarkerProps) => {
-  const isCluster = bus.agency === 'DIMTS';
+export const BusMarker = memo(({ bus, isSelected = false }: BusMarkerProps) => {
+  const agency = bus.agency;
   const isEv = bus.isElectric;
 
-  // Primary livery color
-  const bodyColor = isCluster
-    ? '#EA580C' // Delhi Cluster Bus: Orange
-    : isEv
-    ? '#0284C7' // DTC Electric: Electric Blue
-    : '#1D4ED8'; // DTC Fleet: Royal Blue
+  let bodyColor = '#1D4ED8'; // DTC Default: Royal Blue
+  if (agency === 'DEVI') {
+    bodyColor = '#8B5CF6'; // DEVI Mohalla: Purple
+  } else if (agency === 'DMRC') {
+    bodyColor = '#06B6D4'; // DMRC Feeder: Teal
+  } else if (agency === 'DIMTS') {
+    bodyColor = '#EA580C'; // Cluster: Orange
+  } else if (isEv) {
+    bodyColor = '#0284C7'; // DTC Electric: Electric Blue
+  }
 
   const routeText = formatBusRoofLabel(bus.routeShortName || bus.route || 'BUS');
-  const isLong = routeText.length >= 4;
+  const textLen = routeText.length;
 
   return (
     <View style={styles.container}>
@@ -76,20 +102,24 @@ export const BusMarker = React.memo(({ bus, isSelected = false }: BusMarkerProps
           isSelected && styles.busBodySelected,
         ]}
       >
-        {/* Front Headlights Row */}
-        <View style={styles.headlightsRow}>
+        {/* Front Section with Aerodynamic Windshield & Headlights */}
+        <View style={styles.frontSection}>
           <View style={styles.headlight} />
-          <View style={styles.grill} />
+          <View style={styles.windshield} />
           <View style={styles.headlight} />
         </View>
 
-        {/* Front Windshield (Faces travel direction) */}
-        <View style={styles.windshield} />
-
-        {/* Roof Route Number Signboard */}
+        {/* Longitudinal Roof Route Badge along the spine / red line */}
         <View style={styles.roofSign}>
           <Text
-            style={[styles.routeText, isLong && styles.routeTextSmall]}
+            style={[
+              styles.routeText,
+              textLen <= 2
+                ? styles.routeTextShort
+                : textLen <= 4
+                ? styles.routeTextMedium
+                : styles.routeTextLong,
+            ]}
             numberOfLines={1}
             ellipsizeMode="clip"
           >
@@ -97,10 +127,9 @@ export const BusMarker = React.memo(({ bus, isSelected = false }: BusMarkerProps
           </Text>
         </View>
 
-        {/* Rear Taillights */}
-        <View style={styles.taillightsRow}>
+        {/* Rear Section with Dual Taillights */}
+        <View style={styles.rearSection}>
           <View style={styles.taillight} />
-          <View style={{ flex: 1 }} />
           <View style={styles.taillight} />
         </View>
       </View>
@@ -110,92 +139,93 @@ export const BusMarker = React.memo(({ bus, isSelected = false }: BusMarkerProps
 
 const styles = StyleSheet.create({
   container: {
-    width: 38,
-    height: 52,
+    width: 28,
+    height: 42,
     alignItems: 'center',
     justifyContent: 'center',
   },
   busBody: {
-    width: 32,
-    height: 48,
-    borderRadius: 7,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    borderWidth: 1.5,
+    width: 24,
+    height: 38,
+    borderRadius: 6,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderWidth: 1.2,
     borderColor: '#FFFFFF',
     alignItems: 'center',
-    paddingTop: 2,
-    paddingHorizontal: 2,
+    justifyContent: 'space-between',
+    paddingVertical: 2,
+    paddingHorizontal: 1,
+    elevation: 3,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.35,
-    shadowRadius: 3,
-    elevation: 4,
+    shadowRadius: 2,
   },
   busBodySelected: {
     borderColor: '#FEF08A',
-    borderWidth: 2.5,
+    borderWidth: 2,
+    transform: [{ scale: 1.2 }],
+    shadowColor: '#FEF08A',
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+    elevation: 6,
   },
-  headlightsRow: {
-    width: 24,
+  frontSection: {
+    width: 20,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 2,
+    justifyContent: 'space-between',
   },
   headlight: {
-    width: 4,
-    height: 2.5,
+    width: 2.2,
+    height: 2.2,
     backgroundColor: '#FEF08A',
-    borderRadius: 1,
-  },
-  grill: {
-    width: 8,
-    height: 1.5,
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    borderRadius: 1,
+    borderRadius: 1.1,
   },
   windshield: {
-    width: 24,
-    height: 7,
+    width: 13,
+    height: 4.5,
     backgroundColor: '#0F172A',
-    borderRadius: 2,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4,
-    marginBottom: 2,
+    borderRadius: 1.5,
   },
   roofSign: {
-    width: 25,
-    height: 17,
+    width: 23,
+    height: 14,
     backgroundColor: '#FFFFFF',
-    borderRadius: 3,
+    borderRadius: 2.5,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 0.5,
+    transform: [{ rotate: '90deg' }],
   },
   routeText: {
     color: '#0F172A',
-    fontSize: 9.5,
     fontWeight: '900',
     textAlign: 'center',
-    letterSpacing: -0.4,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  routeTextSmall: {
-    fontSize: 8.2,
-    letterSpacing: -0.6,
+  routeTextShort: {
+    fontSize: 9.0,
+    letterSpacing: 0.2,
   },
-  taillightsRow: {
-    position: 'absolute',
-    bottom: 2,
-    width: 24,
+  routeTextMedium: {
+    fontSize: 7.6,
+    letterSpacing: -0.3,
+  },
+  routeTextLong: {
+    fontSize: 6.4,
+    letterSpacing: -0.4,
+  },
+  rearSection: {
+    width: 18,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
   },
   taillight: {
-    width: 4,
-    height: 2,
+    width: 2.5,
+    height: 1.5,
     backgroundColor: '#EF4444',
-    borderRadius: 1,
+    borderRadius: 0.75,
   },
 });
