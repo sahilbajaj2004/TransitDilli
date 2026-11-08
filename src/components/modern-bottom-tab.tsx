@@ -199,7 +199,7 @@ function TabItem({
         <Ionicons
           name={isFocused ? config.activeIcon : config.inactiveIcon}
           size={isFocused ? 20 : 19}
-          color={isFocused ? '#059669' : '#64748B'}
+          color={isFocused ? '#34D399' : '#94A3B8'}
         />
         <Text
           style={[
@@ -228,10 +228,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F172A',
     borderRadius: 30,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderWidth: 1.5,
+    borderColor: '#334155',
     paddingVertical: 5,
     paddingHorizontal: PADDING_HORIZONTAL,
     width: '100%',
@@ -240,11 +240,11 @@ const styles = StyleSheet.create({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.1,
+        shadowOpacity: 0.3,
         shadowRadius: 16,
       },
       android: {
-        elevation: 8,
+        elevation: 10,
       },
     }),
   },
@@ -253,9 +253,9 @@ const styles = StyleSheet.create({
     top: 5,
     bottom: 5,
     left: 0,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#064E3B',
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: '#059669',
     borderRadius: 24,
     zIndex: 1,
   },
@@ -278,11 +278,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.2,
   },
   tabLabelActive: {
-    color: '#065F46',
+    color: '#34D399',
     fontWeight: '800',
   },
   tabLabelInactive: {
-    color: '#64748B',
+    color: '#94A3B8',
     fontWeight: '600',
   },
 });

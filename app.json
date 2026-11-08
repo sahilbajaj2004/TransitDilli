@@ -35,11 +35,13 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#059669",
+          "backgroundColor": "#0B132B",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 120
         }
-      ]
+      ],
+      "expo-sqlite",
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true,

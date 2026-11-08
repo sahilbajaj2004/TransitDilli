@@ -1,12 +1,12 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
 import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { Dimensions, StyleSheet, View, Text } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
-const DURATION = 600;
+const DURATION = 650;
 
 export function AnimatedSplashOverlay() {
   const [animate, setAnimate] = useState(false);
@@ -16,24 +16,35 @@ export function AnimatedSplashOverlay() {
 
   const splashKeyframe = new Keyframe({
     0: {
+      opacity: 1,
       transform: [{ scale: 1 }],
-      opacity: 1,
     },
-    20: {
+    60: {
       opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
+      transform: [{ scale: 1 }],
     },
     100: {
       opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
+      transform: [{ scale: 1.05 }],
+      easing: Easing.out(Easing.ease),
     },
   });
 
-  const image = <Image style={styles.image} source={require('@/assets/images/logo.png')} contentFit="contain" />;
+  const content = (
+    <View style={styles.splashContent}>
+      <View style={styles.splashLogoCard}>
+        <Image
+          style={styles.splashLogo}
+          source={require('@/assets/images/logo.png')}
+          contentFit="contain"
+        />
+      </View>
+      <Text style={styles.splashTitle}>
+        Transit<Text style={styles.splashTitleAccent}>Dilli</Text>
+      </Text>
+      <Text style={styles.splashSubtitle}>DELHI REAL-TIME TRANSIT RADAR</Text>
+    </View>
+  );
 
   return animate ? (
     <Animated.View
@@ -44,7 +55,7 @@ export function AnimatedSplashOverlay() {
         }
       })}
       style={styles.splashOverlay}>
-      {image}
+      {content}
     </Animated.View>
   ) : (
     <View
@@ -54,7 +65,7 @@ export function AnimatedSplashOverlay() {
         });
       }}
       style={styles.splashOverlay}>
-      {image}
+      {content}
     </View>
   );
 }
@@ -147,9 +158,49 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0B132B',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000,
+    zIndex: 9999,
+  },
+  splashContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splashLogoCard: {
+    width: 96,
+    height: 96,
+    borderRadius: 24,
+    backgroundColor: '#064E3B',
+    borderWidth: 2,
+    borderColor: '#059669',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#10B981',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 10,
+    marginBottom: 16,
+  },
+  splashLogo: {
+    width: 64,
+    height: 64,
+  },
+  splashTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.5,
+  },
+  splashTitleAccent: {
+    color: '#34D399',
+  },
+  splashSubtitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#94A3B8',
+    letterSpacing: 2,
+    marginTop: 6,
   },
 });

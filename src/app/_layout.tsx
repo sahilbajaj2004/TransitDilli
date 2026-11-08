@@ -11,8 +11,8 @@ SplashScreen.preventAutoHideAsync();
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <StatusBar style="dark" />
+    <ThemeProvider value={DarkTheme}>
+      <StatusBar style="light" />
       <AnimatedSplashOverlay />
       <AppTabs />
     </ThemeProvider>

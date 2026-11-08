@@ -1,94 +1,99 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   ScrollView,
   Pressable,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-
-interface RouteLine {
-  id: string;
-  shortName: string;
-  name: string;
-  origin: string;
-  destination: string;
-  agency: 'DTC' | 'DIMTS' | 'EV';
-  agencyColor: string;
-  frequency: string;
-  activeBuses: number;
-  stops: string[];
-}
-
-const DELHI_ROUTES: RouteLine[] = [
-  {
-    id: '534UP',
-    shortName: '534',
-    name: 'Anand Vihar ISBT to Mehrauli Terminal',
-    origin: 'Anand Vihar ISBT',
-    destination: 'Mehrauli Terminal',
-    agency: 'DIMTS',
-    agencyColor: '#2563EB',
-    frequency: '6 min',
-    activeBuses: 28,
-    stops: [
-      'Anand Vihar ISBT',
-      'Sarai Kale Khan ISBT',
-      'Ashram Chowk Flyover',
-      'Lajpat Nagar Ring Road',
-      'South Extension II',
-      'AIIMS Ring Road Hub',
-      'Saket Crossing',
-      'Mehrauli Terminal',
-    ],
-  },
-  {
-    id: 'TMS_UP',
-    shortName: 'TMS+',
-    name: 'Ring Road Mudrika Express (Circular Clockwise)',
-    origin: 'Wazirpur Depot',
-    destination: 'Wazirpur Depot (Circular)',
-    agency: 'EV',
-    agencyColor: '#0891B2',
-    frequency: '4 min',
-    activeBuses: 42,
-    stops: [
-      'Kashmere Gate ISBT',
-      'ITO Express Bus Way',
-      'Sarai Kale Khan ISBT',
-      'AIIMS Ring Road Hub',
-      'Dhaula Kuan Interchange',
-      'Naraina Vihar',
-      'Punjabi Bagh Club',
-      'Wazirpur Depot',
-    ],
-  },
-  {
-    id: '729UP',
-    shortName: '729',
-    name: 'Mori Gate Terminal to Kapashera Border',
-    origin: 'Mori Gate Terminal',
-    destination: 'Kapashera Border',
-    agency: 'DTC',
-    agencyColor: '#059669',
-    frequency: '10 min',
-    activeBuses: 19,
-    stops: [
-      'Mori Gate Terminal',
-      'Rajiv Chowk / CP',
-      'Central Secretariat',
-      'Dhaula Kuan Interchange',
-      'Mahipalpur Crossing',
-      'Kapashera Border',
-    ],
-  },
-];
+import {
+  fetchTransitRoutes,
+  fetchTransitRouteById,
+  TransitRouteItem,
+} from '@/services/api';
+import { searchOfflineRoutes, getOfflineRouteDetails } from '@/services/offline-transit';
 
 export default function ExploreScreen() {
-  const [selectedRoute, setSelectedRoute] = useState<RouteLine>(DELHI_ROUTES[0]);
+  const [routes, setRoutes] = useState<TransitRouteItem[]>([]);
+  const [selectedRoute, setSelectedRoute] = useState<TransitRouteItem | null>(null);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+
+  const loadRoutes = useCallback(async (query?: string) => {
+    try {
+      setLoading(true);
+      // Fast path: 0ms local offline SQLite search
+      const offline = await searchOfflineRoutes(query, 50);
+      if (offline.length > 0) {
+        setRoutes(offline);
+        if (!selectedRoute) {
+          fetchDetails(offline[0].id);
+        }
+      }
+
+      // Network sync
+      const data = await fetchTransitRoutes(query).catch(() => []);
+      if (data.length > 0) {
+        setRoutes(data);
+        if (!selectedRoute) {
+          fetchDetails(data[0].id);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedRoute]);
+
+  const fetchDetails = async (routeId: string) => {
+    try {
+      setLoadingDetails(true);
+      // Fast path: 0ms offline route stops and geometry
+      const offlineDetail = await getOfflineRouteDetails(routeId);
+      if (offlineDetail && offlineDetail.stops.length > 0) {
+        setSelectedRoute(offlineDetail);
+      }
+
+      // Network sync
+      const detailed = await fetchTransitRouteById(routeId).catch(() => null);
+      if (detailed) {
+        setSelectedRoute(detailed);
+      }
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRoutes(search);
+  }, [search, loadRoutes]);
+
+  const filteredRoutes = useMemo(() => {
+    if (!search.trim()) return routes;
+    const q = search.toLowerCase();
+    return routes.filter(
+      (r) =>
+        r.shortName.toLowerCase().includes(q) ||
+        r.longName.toLowerCase().includes(q) ||
+        r.destination.toLowerCase().includes(q) ||
+        r.origin.toLowerCase().includes(q)
+    );
+  }, [routes, search]);
+
+  const agencyColor =
+    selectedRoute?.agency === 'DIMTS'
+      ? '#EA580C' // Cluster Orange
+      : selectedRoute?.isElectric
+      ? '#0284C7' // DTC Electric Blue
+      : '#1D4ED8'; // DTC Royal Blue
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
@@ -106,7 +111,7 @@ export default function ExploreScreen() {
             <Text style={styles.brandTitle}>
               Corridor<Text style={styles.brandTitleAccent}>Explorer</Text>
             </Text>
-            <Text style={styles.brandSubtitle}>Delhi NCT Arterial Transit Network</Text>
+            <Text style={styles.brandSubtitle}>2,600+ Delhi Bus Routes & Timetables</Text>
           </View>
         </View>
       </View>
@@ -115,89 +120,145 @@ export default function ExploreScreen() {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.sectionHeader}>Select Bus Route</Text>
-
-        {/* Route Selector Tabs */}
-        <View style={styles.routeSelectorRow}>
-          {DELHI_ROUTES.map((route) => {
-            const isSelected = selectedRoute.id === route.id;
-            return (
-              <Pressable
-                key={route.id}
-                onPress={() => setSelectedRoute(route)}
-                style={[
-                  styles.routeTab,
-                  isSelected && { borderColor: route.agencyColor, backgroundColor: '#FFFFFF' },
-                ]}
-              >
-                <View style={[styles.tabBadge, { backgroundColor: route.agencyColor }]}>
-                  <Text style={styles.tabBadgeText}>{route.shortName}</Text>
-                </View>
-                <Text style={styles.tabBusesText}>{route.activeBuses} active</Text>
-              </Pressable>
-            );
-          })}
+        {/* Search Route Lines */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={18} color="#94A3B8" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search route (e.g. 505, TMS, 729), terminal..."
+            placeholderTextColor="#94A3B8"
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 && (
+            <Pressable onPress={() => setSearch('')}>
+              <Ionicons name="close-circle" size={18} color="#94A3B8" />
+            </Pressable>
+          )}
         </View>
+
+        <Text style={styles.sectionHeader}>Delhi Bus Trunk Lines ({filteredRoutes.length})</Text>
+
+        {/* Route Selector Chips */}
+        {loading && routes.length === 0 ? (
+          <ActivityIndicator size="small" color="#059669" style={{ marginVertical: 12 }} />
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            style={styles.routeSelectorRow}
+          >
+            {filteredRoutes.slice(0, 20).map((route) => {
+              const isSelected = selectedRoute?.id === route.id;
+              const color =
+                route.agency === 'DIMTS' ? '#EA580C' : route.isElectric ? '#0284C7' : '#1D4ED8';
+
+              return (
+                <TouchableOpacity
+                  key={route.id}
+                  onPress={() => {
+                    setSelectedRoute(route);
+                    fetchDetails(route.id);
+                  }}
+                  activeOpacity={0.7}
+                  style={[
+                    styles.routeTab,
+                    isSelected && { borderColor: color, backgroundColor: '#0F172A', borderWidth: 2 },
+                  ]}
+                >
+                  <View style={[styles.tabBadge, { backgroundColor: color }]}>
+                    <Text style={styles.tabBadgeText} numberOfLines={1}>{route.shortName}</Text>
+                  </View>
+                  <Text style={styles.tabBusesText}>{route.activeBusCount ?? 4} active</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
 
         {/* Route Overview Card */}
-        <View style={styles.routeOverviewCard}>
-          <View style={styles.overviewTop}>
-            <View style={[styles.bigBadge, { backgroundColor: selectedRoute.agencyColor }]}>
-              <Text style={styles.bigBadgeText}>{selectedRoute.shortName}</Text>
-            </View>
-            <View style={styles.overviewInfo}>
-              <Text style={styles.routeName}>{selectedRoute.name}</Text>
-              <Text style={styles.routeAgency}>
-                Operated by {selectedRoute.agency} • Frequency: {selectedRoute.frequency}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.terminalsRow}>
-            <View style={styles.terminalBox}>
-              <Text style={styles.terminalLabel}>ORIGIN</Text>
-              <Text style={styles.terminalName}>{selectedRoute.origin}</Text>
-            </View>
-            <Text style={styles.arrowText}>→</Text>
-            <View style={styles.terminalBox}>
-              <Text style={styles.terminalLabel}>DESTINATION</Text>
-              <Text style={styles.terminalName}>{selectedRoute.destination}</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Stop Progression Timeline */}
-        <Text style={[styles.sectionHeader, { marginTop: Spacing.four }]}>
-          Corridor Stop Sequence ({selectedRoute.stops.length} Stops)
-        </Text>
-
-        <View style={styles.timelineContainer}>
-          {selectedRoute.stops.map((stop, index) => {
-            const isFirst = index === 0;
-            const isLast = index === selectedRoute.stops.length - 1;
-
-            return (
-              <View key={index} style={styles.timelineItem}>
-                <View style={styles.timelineIndicatorCol}>
-                  <View
-                    style={[
-                      styles.timelineDot,
-                      (isFirst || isLast) && { backgroundColor: selectedRoute.agencyColor },
-                    ]}
-                  />
-                  {!isLast && <View style={styles.timelineLine} />}
-                </View>
-                <View style={styles.timelineContent}>
-                  <Text style={[styles.stopName, (isFirst || isLast) && styles.terminalStopName]}>
-                    {stop}
+        {selectedRoute && (
+          <View style={styles.routeOverviewCard}>
+            <View style={styles.overviewTop}>
+              <View style={[styles.bigBadge, { backgroundColor: agencyColor }]}>
+                <Text style={styles.bigBadgeText}>{selectedRoute.shortName}</Text>
+              </View>
+              <View style={styles.overviewInfo}>
+                <Text style={styles.routeName}>{selectedRoute.longName}</Text>
+                <View style={styles.overviewMeta}>
+                  <Text style={styles.metaBadge}>{selectedRoute.agency}</Text>
+                  {selectedRoute.isElectric && (
+                    <Text style={[styles.metaBadge, styles.metaBadgeEv]}>⚡ EV Fleet</Text>
+                  )}
+                  <Text style={styles.activeBusesCount}>
+                    {selectedRoute.activeBusCount ?? 4} buses tracked live
                   </Text>
-                  <Text style={styles.stopSequenceText}>Stop #{index + 1}</Text>
                 </View>
               </View>
-            );
-          })}
-        </View>
+            </View>
+
+            {/* Terminals Banner */}
+            <View style={styles.terminalsBox}>
+              <View style={styles.terminalItem}>
+                <View style={[styles.terminalDot, { backgroundColor: '#059669' }]} />
+                <View>
+                  <Text style={styles.terminalLabel}>Origin Terminal</Text>
+                  <Text style={styles.terminalName}>{selectedRoute.origin}</Text>
+                </View>
+              </View>
+              <View style={styles.terminalDivider} />
+              <View style={styles.terminalItem}>
+                <View style={[styles.terminalDot, { backgroundColor: '#DC2626' }]} />
+                <View>
+                  <Text style={styles.terminalLabel}>Destination Terminal</Text>
+                  <Text style={styles.terminalName}>{selectedRoute.destination}</Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Stop Sequence List */}
+            <Text style={[styles.sectionHeader, { marginTop: Spacing.three, marginBottom: 8 }]}>
+              Stop Sequence ({selectedRoute.stops.length} Stops)
+            </Text>
+
+            {loadingDetails ? (
+              <ActivityIndicator size="small" color="#059669" style={{ marginVertical: 16 }} />
+            ) : selectedRoute.stops.length === 0 ? (
+              <Text style={styles.noStopsText}>Regular Delhi NCT arterial line.</Text>
+            ) : (
+              <View style={styles.stopsTimeline}>
+                {selectedRoute.stops.map((stop, index) => {
+                  const isFirst = index === 0;
+                  const isLast = index === selectedRoute.stops.length - 1;
+
+                  return (
+                    <View key={`${stop.stopId}-${index}`} style={styles.timelineRow}>
+                      <View style={styles.timelineGutter}>
+                        <View
+                          style={[
+                            styles.timelineDot,
+                            isFirst && styles.timelineDotStart,
+                            isLast && styles.timelineDotEnd,
+                          ]}
+                        />
+                        {!isLast && <View style={styles.timelineLine} />}
+                      </View>
+                      <View style={styles.timelineContent}>
+                        <Text style={[styles.stopNameText, (isFirst || isLast) && styles.stopNameBold]}>
+                          {stop.stopName}
+                        </Text>
+                        <Text style={styles.stopSeqText}>Stop #{stop.sequence}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -206,14 +267,14 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0B132B',
   },
   header: {
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#0F172A',
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: '#1E293B',
   },
   brandRow: {
     flexDirection: 'row',
@@ -224,9 +285,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#064E3B',
     borderWidth: 1.5,
-    borderColor: '#A7F3D0',
+    borderColor: '#059669',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -241,191 +302,246 @@ const styles = StyleSheet.create({
   brandTitle: {
     fontSize: 18,
     fontWeight: '800',
-    color: '#0F172A',
+    color: '#F8FAFC',
     letterSpacing: -0.5,
   },
   brandTitleAccent: {
-    color: '#059669',
+    color: '#34D399',
   },
   brandSubtitle: {
     fontSize: 11,
-    color: '#64748B',
+    color: '#94A3B8',
     marginTop: 1,
   },
   scroll: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0B132B',
   },
   scrollContent: {
     padding: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.five,
+    paddingBottom: BottomTabInset + Spacing.five + 40,
     maxWidth: MaxContentWidth,
     alignSelf: 'center',
     width: '100%',
   },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    borderWidth: 1,
+    borderColor: '#334155',
+    marginBottom: Spacing.three,
+    height: 44,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    color: '#F8FAFC',
+    paddingVertical: 0,
+  },
   sectionHeader: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
+    color: '#94A3B8',
     textTransform: 'uppercase',
-    color: '#64748B',
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     marginBottom: Spacing.two,
   },
   routeSelectorRow: {
-    flexDirection: 'row',
-    gap: Spacing.two,
     marginBottom: Spacing.three,
   },
   routeTab: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: '#1E293B',
     borderRadius: 12,
-    padding: Spacing.two,
+    padding: 10,
+    borderWidth: 1.5,
+    borderColor: '#334155',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+    minWidth: 70,
   },
   tabBadge: {
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 6,
-    marginBottom: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: 120,
   },
   tabBadgeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   tabBusesText: {
-    fontSize: 10,
-    color: '#64748B',
+    fontSize: 9,
     fontWeight: '600',
-    fontVariant: ['tabular-nums'],
+    color: '#94A3B8',
+    marginTop: 4,
   },
   routeOverviewCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: '#0F172A',
+    borderRadius: 16,
     padding: Spacing.three,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    borderWidth: 1.5,
+    borderColor: '#334155',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
   overviewTop: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.two + 2,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    paddingBottom: Spacing.three,
+    alignItems: 'flex-start',
+    gap: 12,
   },
   bigBadge: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   bigBadgeText: {
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '900',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   overviewInfo: {
     flex: 1,
   },
   routeName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    lineHeight: 18,
   },
-  routeAgency: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  terminalsRow: {
+  overviewMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 10,
-    padding: Spacing.two + 2,
-    marginTop: Spacing.three,
+    gap: 6,
+    marginTop: 4,
   },
-  terminalBox: {
-    flex: 1,
+  metaBadge: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#34D399',
+    backgroundColor: '#064E3B',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  metaBadgeEv: {
+    color: '#38BDF8',
+    backgroundColor: '#083344',
+  },
+  activeBusesCount: {
+    fontSize: 10,
+    color: '#94A3B8',
+    fontWeight: '500',
+  },
+  terminalsBox: {
+    backgroundColor: '#1E293B',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: Spacing.three,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  terminalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  terminalDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   terminalLabel: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#94A3B8',
+    textTransform: 'uppercase',
   },
   terminalName: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#1E293B',
-    marginTop: 2,
+    color: '#F8FAFC',
   },
-  arrowText: {
-    fontSize: 16,
+  terminalDivider: {
+    height: 1,
+    backgroundColor: '#334155',
+    marginVertical: 8,
+    marginLeft: 20,
+  },
+  noStopsText: {
+    fontSize: 12,
     color: '#94A3B8',
-    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
-  timelineContainer: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: Spacing.four,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+  stopsTimeline: {
+    marginTop: 6,
   },
-  timelineItem: {
+  timelineRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  timelineIndicatorCol: {
-    alignItems: 'center',
+  timelineGutter: {
     width: 24,
+    alignItems: 'center',
   },
   timelineDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#CBD5E1',
-    borderWidth: 2,
-    borderColor: '#FFFFFF',
+    backgroundColor: '#475569',
+    marginTop: 4,
+  },
+  timelineDotStart: {
+    backgroundColor: '#10B981',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  timelineDotEnd: {
+    backgroundColor: '#EF4444',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
   timelineLine: {
     width: 2,
-    height: 36,
-    backgroundColor: '#E2E8F0',
-    marginVertical: 2,
+    flex: 1,
+    minHeight: 28,
+    backgroundColor: '#334155',
   },
   timelineContent: {
     flex: 1,
-    paddingLeft: Spacing.two,
-    paddingBottom: Spacing.three,
+    paddingBottom: 14,
+    paddingLeft: 8,
   },
-  stopName: {
+  stopNameText: {
     fontSize: 12,
-    fontWeight: '600',
-    color: '#334155',
+    color: '#CBD5E1',
+    fontWeight: '500',
   },
-  terminalStopName: {
+  stopNameBold: {
     fontWeight: '800',
-    color: '#0F172A',
+    color: '#F8FAFC',
   },
-  stopSequenceText: {
+  stopSeqText: {
     fontSize: 10,
-    color: '#94A3B8',
+    color: '#64748B',
     marginTop: 1,
   },
 });
